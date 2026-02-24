@@ -1,0 +1,40 @@
+[project]
+name = "promtomatic"
+version = "0.1.0"
+description = "A Powerful Framework for LLM Prompt Optimization"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.18.0",
+    "backoff>=2.2.0",
+    "bert-score>=0.3.13",
+    "colorama>=0.4.6",
+    "datasets>=2.14.0",
+    "dspy>=2.6.0",
+    "flask>=2.0.0",
+    "langdetect>=1.0.9",
+    "litellm>=1.81.15",
+    "nltk>=3.8",
+    "numpy>=1.21.0",
+    "openai>=1.0.0",
+    "pandas>=1.5.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=0.19.0",
+    "pyyaml>=6.0",
+    "requests>=2.25.0",
+    "rouge>=1.0.0",
+    "rouge-score>=0.1.2",
+    "ujson>=5.0.0",
+]
+
+[project.scripts]
+promtomatic = "promptomatix.cli.parser:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv.sources]
+dspy = { path = "libs/dspy", editable = true }
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
