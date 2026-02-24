@@ -13,7 +13,8 @@ from typing import Dict, Optional, List
 from pathlib import Path
 import time
 import ast
-from openai import OpenAI, APITimeoutError, InternalServerError, RateLimitError, UnprocessableEntityError
+import litellm
+from litellm.exceptions import APIError as LiteLLMAPIError, RateLimitError as LiteLLMRateLimitError, Timeout as LiteLLMTimeout
 import backoff
 from dotenv import load_dotenv
 import colorama
@@ -80,13 +81,12 @@ def process_input(**kwargs) -> Dict:
         )
         
         # Initialize language model with configurable parameters
-        lm = dspy.LM(
-            config.model_name,
-            api_key=config.model_api_key,
-            api_base=config.model_api_base,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens
-        )
+        lm_kwargs = dict(temperature=config.temperature, max_tokens=config.max_tokens)
+        if config.model_api_key is not None:
+            lm_kwargs['api_key'] = config.model_api_key
+        if config.model_api_base is not None:
+            lm_kwargs['api_base'] = config.model_api_base
+        lm = dspy.LM(config.model_name, **lm_kwargs)
         dspy.configure(lm=lm)
                 
         # Create and run optimizer
@@ -194,14 +194,12 @@ def optimize_with_feedback(session_id: str) -> Dict:
         dspy.settings.configure(reset=True)
         
         # Initialize language model
-        lm = dspy.LM(
-            feedback_config.model_name,
-            api_key=feedback_config.model_api_key,
-            api_base=feedback_config.model_api_base,
-            temperature=feedback_config.temperature,
-            max_tokens=feedback_config.max_tokens,
-            cache=True
-        )
+        lm_kwargs = dict(temperature=feedback_config.temperature, max_tokens=feedback_config.max_tokens, cache=True)
+        if feedback_config.model_api_key is not None:
+            lm_kwargs['api_key'] = feedback_config.model_api_key
+        if feedback_config.model_api_base is not None:
+            lm_kwargs['api_base'] = feedback_config.model_api_base
+        lm = dspy.LM(feedback_config.model_name, **lm_kwargs)
         
         # Configure DSPy with the new LM instance
         dspy.configure(lm=lm)
@@ -302,14 +300,12 @@ def optimize_with_synthetic_feedback(session_id: str, synthetic_feedback: str) -
         # Create a new DSPy settings context for this thread
         with dspy.settings.context():
             # Initialize language model
-            lm = dspy.LM(
-                feedback_config.model_name,
-                api_key=feedback_config.model_api_key,
-                api_base=feedback_config.model_api_base,
-                temperature=feedback_config.temperature,
-                max_tokens=feedback_config.max_tokens,
-                cache=True
-            )
+            lm_kwargs = dict(temperature=feedback_config.temperature, max_tokens=feedback_config.max_tokens, cache=True)
+            if feedback_config.model_api_key is not None:
+                lm_kwargs['api_key'] = feedback_config.model_api_key
+            if feedback_config.model_api_base is not None:
+                lm_kwargs['api_base'] = feedback_config.model_api_base
+            lm = dspy.LM(feedback_config.model_name, **lm_kwargs)
             
             # Configure DSPy with the new LM instance
             dspy.configure(lm=lm)
@@ -611,9 +607,13 @@ def generate_feedback(
         if not input_fields or not output_fields:
             raise ValueError("Input fields and output fields are required")
         
-        # Initialize OpenAI client for feedback generation
-        openai_client = OpenAI(api_key=model_api_key, base_url=model_api_base)
-        
+        # litellm 共通呼び出し設定（api_key / api_base が None の場合は渡さない）
+        _litellm_kwargs: dict = {}
+        if model_api_key is not None:
+            _litellm_kwargs['api_key'] = model_api_key
+        if model_api_base is not None:
+            _litellm_kwargs['api_base'] = model_api_base
+
         # Import the feedback generation functions
         from promptomatix.core.prompts import generate_prompt_feedback_3, genrate_prompt_changes_prompt_2, generate_prompt_changes_prompt_3, generate_prompt_changes_prompt_4
         
@@ -653,17 +653,18 @@ def generate_feedback(
                 else:
                     expected_output = str(sample.get(output_fields, ""))
                 
-                # Generate AI system output using direct OpenAI API call instead of DSPy
+                # Generate AI system output via litellm（全プロバイダ対応）
                 @backoff.on_exception(
                     backoff.expo,
-                    (APITimeoutError, InternalServerError, RateLimitError, UnprocessableEntityError),
+                    (LiteLLMAPIError, LiteLLMRateLimitError, LiteLLMTimeout),
                     max_tries=3,
                     max_time=60
                 )
                 def get_ai_output(prompt):
-                    response = openai_client.chat.completions.create(
+                    response = litellm.completion(
                         model=model_name,
-                        messages=[{"role": "user", "content": prompt}]
+                        messages=[{"role": "user", "content": prompt}],
+                        **_litellm_kwargs
                     )
                     return response.choices[0].message.content
                 
@@ -679,21 +680,22 @@ def generate_feedback(
                 
                 feedback_prompts.append(feedback_prompt)
                 
-                # Get feedback from OpenAI API with retry logic
+                # Get feedback via litellm（全プロバイダ対応）
                 @backoff.on_exception(
                     backoff.expo,
-                    (APITimeoutError, InternalServerError, RateLimitError, UnprocessableEntityError),
+                    (LiteLLMAPIError, LiteLLMRateLimitError, LiteLLMTimeout),
                     max_tries=3,
                     max_time=60
                 )
-                def get_openai_feedback(prompt):
-                    response = openai_client.chat.completions.create(
-                        model="o3",
-                        messages=[{"role": "user", "content": prompt}]
+                def get_litellm_feedback(prompt):
+                    response = litellm.completion(
+                        model=model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        **_litellm_kwargs
                     )
                     return response.choices[0].message.content
                 
-                feedback_response = get_openai_feedback(feedback_prompt)
+                feedback_response = get_litellm_feedback(feedback_prompt)
                 individual_feedbacks.append({
                     'sample_index': i,
                     'user_input': user_input,
@@ -739,19 +741,20 @@ def generate_feedback(
             for fb in individual_feedbacks
         ])
         
-        # Generate comprehensive feedback using OpenAI API
+        # Generate comprehensive feedback via litellm（全プロバイダ対応）
         comprehensive_feedback_prompt = generate_prompt_changes_prompt_4(optimized_prompt, feedback_list)
         
         @backoff.on_exception(
             backoff.expo,
-            (APITimeoutError, InternalServerError, RateLimitError, UnprocessableEntityError),
+            (LiteLLMAPIError, LiteLLMRateLimitError, LiteLLMTimeout),
             max_tries=3,
             max_time=60
         )
         def get_comprehensive_feedback(prompt):
-            response = openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}]
+            response = litellm.completion(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                **_litellm_kwargs
             )
             return response.choices[0].message.content
         

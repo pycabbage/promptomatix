@@ -7,6 +7,7 @@ dependencies = [
     "anthropic>=0.18.0",
     "backoff>=2.2.0",
     "bert-score>=0.3.13",
+    "boto3>=1.42.55",
     "colorama>=0.4.6",
     "datasets>=2.14.0",
     "dspy>=2.6.0",

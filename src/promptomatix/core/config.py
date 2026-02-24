@@ -38,6 +38,7 @@ class ModelProvider(Enum):
     DATABRICKS = 'databricks'
     LOCAL = 'local'
     TOGETHERAI = 'togetherai'
+    BEDROCK = 'bedrock'
 
 DEFAULT_SYNTHETIC_DATA_SIZE = 30
 DEFAULT_TRAIN_RATIO = 0.2
@@ -911,6 +912,11 @@ class Config:
                 'api_base': 'https://api.together.xyz/',
                 'env_key': 'TOGETHERAI_API_KEY',
                 'default_model': 'together_ai/mistralai/Mistral-Small-24B-Instruct-2501'
+            },
+            ModelProvider.BEDROCK: {
+                'api_base': None,
+                'env_key': None,  # boto3 クレデンシャルチェーン（IAM Role / ~/.aws/credentials / 環境変数）を利用
+                'default_model': 'bedrock/apac.amazon.nova-micro-v1:0'
             }
         }
 
@@ -940,27 +946,16 @@ class Config:
                 'api_base': 'https://api.together.xyz/',
                 'env_key': 'TOGETHERAI_API_KEY',
                 'default_model': 'together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo'
+            },
+            ModelProvider.BEDROCK: {
+                'api_base': None,
+                'env_key': None,  # boto3 クレデンシャルチェーンを利用
+                'default_model': 'bedrock/apac.amazon.nova-micro-v1:0'
             }
         }
 
-        # If no model name provided, set defaults
-        if not self.model_name:
-            if self.model_provider is None:
-                self.model_provider = ModelProvider.OPENAI
-                # self.model_provider = ModelProvider.TOGETHERAI
-            self.model_name = PROVIDER_CONFIGS[ModelProvider.OPENAI]['default_model']
-            # self.model_name = PROVIDER_CONFIGS[ModelProvider.TOGETHERAI]['default_model']
-
-        if not self.config_model_name:
-            if self.config_model_provider is None:
-                self.config_model_provider = ModelProvider.OPENAI
-                # self.config_model_provider = ModelProvider.TOGETHERAI
-            self.config_model_name = PROVIDER_CONFIGS_FOR_CONFIG_MODEL[ModelProvider.OPENAI]['default_model']
-            # self.config_model_name = PROVIDER_CONFIGS_FOR_CONFIG_MODEL[ModelProvider.TOGETHERAI]['default_model']
-        
-        # Convert string to enum if needed
+        # 文字列→enum変換を先に行う（デフォルト設定前に確定させる）
         if isinstance(self.model_provider, str):
-            # Handle modelprovider prefix
             if self.model_provider.startswith('modelprovider.'):
                 self.model_provider = self.model_provider.split('.')[-1]
             try:
@@ -968,12 +963,8 @@ class Config:
             except ValueError:
                 valid_providers = [p.value for p in ModelProvider]
                 raise ValueError(f"Invalid model provider. Must be one of: {valid_providers}")
-            if not self.model_name:
-                self.model_name = PROVIDER_CONFIGS[ModelProvider.OPENAI]['default_model']
-                # self.model_name = PROVIDER_CONFIGS[ModelProvider.TOGETHERAI]['default_model']
 
         if isinstance(self.config_model_provider, str):
-            # Handle modelprovider prefix
             if self.config_model_provider.startswith('modelprovider.'):
                 self.config_model_provider = self.config_model_provider.split('.')[-1]
             try:
@@ -981,9 +972,26 @@ class Config:
             except ValueError:
                 valid_providers = [p.value for p in ModelProvider]
                 raise ValueError(f"Invalid model provider. Must be one of: {valid_providers}")
-            if not self.config_model_provider:
-                self.config_model_provider = PROVIDER_CONFIGS_FOR_CONFIG_MODEL[ModelProvider.OPENAI]['default_model']
-                # self.config_model_provider = PROVIDER_CONFIGS_FOR_CONFIG_MODEL[ModelProvider.TOGETHERAI]['default_model']
+
+        # model_provider が未設定なら OpenAI をデフォルトにする
+        if self.model_provider is None:
+            self.model_provider = ModelProvider.OPENAI
+
+        # config_model_provider が未設定なら model_provider と同じにする
+        if self.config_model_provider is None:
+            self.config_model_provider = self.model_provider
+
+        # model_name が未設定なら環境変数 → プロバイダのデフォルトの順でフォールバック
+        if not self.model_name:
+            self.model_name = os.environ.get('MODEL_NAME')
+        if not self.model_name:
+            self.model_name = PROVIDER_CONFIGS[self.model_provider]['default_model']
+
+        # config_model_name が未設定なら環境変数 → プロバイダのデフォルトの順でフォールバック
+        if not self.config_model_name:
+            self.config_model_name = os.environ.get('CONFIG_MODEL_NAME')
+        if not self.config_model_name:
+            self.config_model_name = PROVIDER_CONFIGS_FOR_CONFIG_MODEL[self.config_model_provider]['default_model']
 
         # Get provider configuration
         try:
@@ -1003,6 +1011,15 @@ class Config:
             self.model_api_base = provider_config['api_base']
         if self.config_model_api_base is None:
             self.config_model_api_base = config_provider_config['api_base']
+
+        # Bedrock はモデルごとに最大トークン制限があるため、超過している場合は上限を適用する
+        BEDROCK_MAX_TOKENS = 8192
+        if self.model_provider == ModelProvider.BEDROCK:
+            if self.max_tokens > BEDROCK_MAX_TOKENS:
+                self.max_tokens = BEDROCK_MAX_TOKENS
+        if self.config_model_provider == ModelProvider.BEDROCK:
+            if self.config_max_tokens > BEDROCK_MAX_TOKENS:
+                self.config_max_tokens = BEDROCK_MAX_TOKENS
 
         # Set API key if required
         if provider_config['env_key']:
@@ -1033,14 +1050,16 @@ class Config:
 
         # Initialize language model
         try:
-            tmp_lm = dspy.LM(
-                self.config_model_name,
-                api_key=self.config_model_api_key,
-                api_base=self.config_model_api_base,
+            lm_kwargs = dict(
                 max_tokens=self.config_max_tokens,
                 temperature=self.config_temperature,
-                cache=True
+                cache=True,
             )
+            if self.config_model_api_key is not None:
+                lm_kwargs['api_key'] = self.config_model_api_key
+            if self.config_model_api_base is not None:
+                lm_kwargs['api_base'] = self.config_model_api_base
+            tmp_lm = dspy.LM(self.config_model_name, **lm_kwargs)
             logger.info(f"Successfully initialized {self.config_model_provider.value} model: {self.config_model_name}")
             
             # Log model configuration (excluding sensitive data)

@@ -404,7 +404,7 @@ class PromptOptimizer:
             # print("~"*100)
             
             # Get optimized prompt from LLM using direct API calls
-            optimized_prompt = self._call_llm_api_directly(meta_prompt, "gpt-4.1")
+            optimized_prompt = self._call_llm_api_directly(meta_prompt)
             
             # Evaluate optimized prompt
             print("📊 Evaluating optimized prompt...")
@@ -561,127 +561,45 @@ class PromptOptimizer:
 
     def _call_llm_api_directly(self, prompt: str, model: str = "") -> str:
         """
-        Call LLM API directly based on the configured provider.
+        litellm 経由で全プロバイダに対応した LLM 呼び出しを行う。
         
         Args:
             prompt (str): The prompt to send to the LLM
+            model (str): Override model name (uses config_model_name if empty)
             
         Returns:
             str: The LLM response
         """
-        try:
-            # Determine the provider from config
-            provider = getattr(self.config, 'config_model_provider', 'openai')
-            if hasattr(provider, 'value'):
-                provider = provider.value
-            
-            if provider.lower() == 'openai':
-                oai_ouput = self._call_openai_api(prompt, model)
-                return oai_ouput
-            elif provider.lower() == 'anthropic':
-                return self._call_anthropic_api(prompt)
-            else:
-                raise ValueError(f"Unsupported provider for direct API calls: {provider}")
-                
-        except Exception as e:
-            self.logger.error(f"Error calling LLM API directly: {str(e)}")
-            raise
+        import litellm
 
-    def _call_openai_api(self, prompt: str, model: str = "") -> str:
-        """
-        Call OpenAI API directly.
-        
-        Args:
-            prompt (str): The prompt to send
-            
-        Returns:
-            str: The API response
-        """
         if model == "":
             model = self.config.config_model_name
-        from openai import OpenAI
-        
-        # Configure OpenAI client
-        client = OpenAI(
-            api_key=self.config.config_model_api_key,
-            base_url=self.config.config_model_api_base if self.config.config_model_api_base else None
-        )
 
+        call_kwargs: dict = dict(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.config.config_temperature,
+            max_tokens=self.config.config_max_tokens,
+        )
+        if self.config.config_model_api_key is not None:
+            call_kwargs['api_key'] = self.config.config_model_api_key
+        if self.config.config_model_api_base is not None:
+            call_kwargs['api_base'] = self.config.config_model_api_base
 
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.0
-            )
-            
-            # Extract response content
+            response = litellm.completion(**call_kwargs)
             response_text = response.choices[0].message.content
-            
-            # Calculate cost (approximate)
-            # OpenAI pricing varies by model, this is a rough estimate
-            input_tokens = len(prompt.split()) * 1.3  # Rough token estimation
+
+            # トークンコストの概算
+            input_tokens = len(prompt.split()) * 1.3
             output_tokens = len(response_text.split()) * 1.3
-            
-            # Estimate cost (this would need to be updated with actual pricing)
-            estimated_cost = (input_tokens * 0.00001) + (output_tokens * 0.00003)  # Rough estimate
+            estimated_cost = (input_tokens * 0.00001) + (output_tokens * 0.00003)
             self.llm_cost += estimated_cost
 
-            if model != "o3" and model != "gpt-4.1":
-                return self._clean_llm_response(response_text)
-            else:
-                return response_text
-            
-        except Exception as e:
-            self.logger.error(f"Error calling OpenAI API: {str(e)}")
-            raise
-
-    def _call_anthropic_api(self, prompt: str) -> str:
-        """
-        Call Anthropic API directly.
-        
-        Args:
-            prompt (str): The prompt to send
-            
-        Returns:
-            str: The API response
-        """
-        import anthropic
-        
-        # Configure Anthropic client
-        client = anthropic.Anthropic(
-            api_key=self.config.config_model_api_key,
-            base_url=self.config.config_model_api_base if self.config.config_model_api_base else None
-        )
-        
-        try:
-            response = client.messages.create(
-                model=self.config.config_model_name,
-                max_tokens=self.config.config_max_tokens,
-                temperature=self.config.config_temperature,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            
-            # Extract response content
-            response_text = response.content[0].text
-            
-            # Calculate cost (approximate)
-            # Anthropic pricing varies by model, this is a rough estimate
-            input_tokens = len(prompt.split()) * 1.3  # Rough token estimation
-            output_tokens = len(response_text.split()) * 1.3
-            
-            # Estimate cost (this would need to be updated with actual pricing)
-            estimated_cost = (input_tokens * 0.000015) + (output_tokens * 0.000075)  # Rough estimate
-            self.llm_cost += estimated_cost
-            
             return self._clean_llm_response(response_text)
-            
+
         except Exception as e:
-            self.logger.error(f"Error calling Anthropic API: {str(e)}")
+            self.logger.error(f"Error calling LLM API directly: {str(e)}")
             raise
 
     def _parse_input_fields(self) -> Union[str, List[str], Tuple[str, ...]]:

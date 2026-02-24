@@ -33,7 +33,7 @@ def parse_args() -> Dict:
     model_group.add_argument("--model_name", type=str, help="Model name")
     model_group.add_argument("--model_api_key", type=str, help="Model API key")
     model_group.add_argument("--model_api_base", type=str, help="Model API base")
-    model_group.add_argument("--model_provider", type=str, help="Model provider")
+    model_group.add_argument("--model_provider", type=str, help="Model provider (openai, anthropic, databricks, local, togetherai, bedrock)")
     model_group.add_argument("--temperature", type=float, 
                            help="Model temperature (default: 0.7)")
     model_group.add_argument("--max_tokens", type=int, 
@@ -100,7 +100,7 @@ def main():
         
         if args.get('raw_input'):
             print(f" Optimizing prompt: {args['raw_input']}")
-            result = process_input(human_input=args['raw_input'])
+            result = process_input(**args)
             print(f"\n✅ Optimized prompt:\n{result['result']}")
             print(f"\n📝 Session ID: {result['session_id']}")
         else:

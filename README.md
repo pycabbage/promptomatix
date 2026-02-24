@@ -6,7 +6,7 @@
 </div>
 
 <div align="center">
-  <img src="https://img.shields.io/badge/Python-3.8%2B-brightgreen.svg" alt="Python 3.8+">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/License-Apache-green.svg" alt="License">
   <a href="https://arxiv.org/abs/2507.14241" target="_blank">
     <img src="https://img.shields.io/badge/arXiv-2507.14241-b31b1b.svg" alt="arXiv">
@@ -74,30 +74,30 @@ cd promptomatix
 ```
 
 The installer will:
-- ✅ Check Python 3 installation
-- ✅ Create a virtual environment (`promptomatix_env`)
+- ✅ Install [uv](https://docs.astral.sh/uv/) (if not already installed)
 - ✅ Initialize git submodules (DSPy)
-- ✅ Install all dependencies
+- ✅ Create a virtual environment (`.venv`) and install all dependencies via `uv sync`
+- ✅ Download required NLTK data
 
-### 🔧 Activate the Environment
+### Manual Installation
 
-**Important**: You need to activate the virtual environment each time you use Promptomatix:
+If you prefer to install manually without the script:
 
 ```bash
-# Activate the environment
-source promptomatix_env/bin/activate
+# Install uv (if not installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# You'll see (promptomatix_env) in your prompt when activated
+# Initialize git submodules
+git submodule update --init --recursive
+
+# Install all dependencies
+uv sync
 ```
 
 ### 🔑 Set Up API Keys
 
 ```bash
-# Set your API keys
-export OPENAI_API_KEY="your_openai_api_key"
-export ANTHROPIC_API_KEY="your_anthropic_api_key"
-
-# Or create a .env file
+# Create a .env file from the example
 cp .env.example .env
 # Edit .env with your actual API keys
 ```
@@ -106,19 +106,20 @@ cp .env.example .env
 
 ```bash
 # Test the installation
-python -m src.promptomatix.main --raw_input "Given a questions about human anatomy answer it in two words" --model_name "gpt-3.5-turbo" --backend "simple_meta_prompt" --synthetic_data_size 10 --model_provider "openai"
+uv run promtomatic --raw_input "Given a questions about human anatomy answer it in two words" --model_name "gpt-3.5-turbo" --backend "simple_meta_prompt" --synthetic_data_size 10 --model_provider "openai"
 ```
 
 ### 💡 Pro Tips
 
-**Auto-activation**: Add this to your `~/.bashrc` or `~/.zshrc`:
+**Running commands**: Prefix commands with `uv run` to automatically use the project's virtual environment:
 ```bash
-alias promptomatix='source promptomatix_env/bin/activate && promptomatix'
+uv run promtomatic --help
+uv run python -m src.promptomatix.main --help
 ```
 
-**Deactivate when done**:
+**Activating the environment** (optional, if you prefer not to use `uv run`):
 ```bash
-deactivate
+source .venv/bin/activate
 ```
 
 ## 🚀 Example Usage
@@ -218,10 +219,7 @@ promptomatix/
 ├── images/                # Project images and logos
 ├── libs/                  # External libraries or submodules (e.g., DSPy)
 ├── logs/                  # Log files
-├── promptomatix_env/      # Python virtual environment
 ├── sessions/              # Saved optimization sessions
-├── dist/                  # Distribution files (if any)
-├── build/                 # Build artifacts (if any)
 ├── examples/              # Example notebooks and scripts
 ├── src/
 │   └── promptomatix/      # Core Python package
@@ -245,7 +243,8 @@ promptomatix/
 ├── SECURITY.md
 ├── how_to_license.md
 ├── install.sh
-├── requirements.txt
+├── pyproject.toml
+├── uv.lock
 ├── setup.py
 ```
 ---

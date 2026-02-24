@@ -80,7 +80,7 @@ def main():
             "ujson>=5.0.0",
             "litellm",
         ],
-        python_requires=">=3.8",
+        python_requires=">=3.10",
         entry_points={
             "console_scripts": [
                 "promtomatic=promtomatic.cli.parser:main",
